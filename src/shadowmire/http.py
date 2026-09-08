@@ -1,5 +1,6 @@
 import functools
 import logging
+import os
 from pathlib import Path
 
 import requests
@@ -11,6 +12,20 @@ from .filesystem import overwrite
 logger = logging.getLogger(__name__)
 
 
+class SourceAddressAdapter(HTTPAdapter):
+    def __init__(self, address: str, **kwargs):
+        self.source_address = (address, 0)
+        super().__init__(**kwargs)
+
+    def init_poolmanager(self, connections, maxsize, block=False, **pool_kwargs):
+        pool_kwargs["source_address"] = self.source_address
+        super().init_poolmanager(connections, maxsize, block=block, **pool_kwargs)
+
+    def proxy_manager_for(self, proxy, **proxy_kwargs):
+        proxy_kwargs["source_address"] = self.source_address
+        return super().proxy_manager_for(proxy, **proxy_kwargs)
+
+
 def create_requests_session() -> requests.Session:
     s = requests.Session()
     # hardcode 1min timeout for connect & read for now
@@ -18,8 +33,14 @@ def create_requests_session() -> requests.Session:
     # A hack to overwrite get() method
     s.get_orig, s.get = s.get, functools.partial(s.get, timeout=(60, 60))  # type: ignore
     retries = Retry(total=3, backoff_factor=0.1)
-    s.mount("http://", HTTPAdapter(max_retries=retries))
-    s.mount("https://", HTTPAdapter(max_retries=retries))
+    bind_address = os.environ.get("BIND_ADDRESS")
+    for scheme in ("http://", "https://"):
+        adapter = (
+            SourceAddressAdapter(bind_address, max_retries=retries)
+            if bind_address
+            else HTTPAdapter(max_retries=retries)
+        )
+        s.mount(scheme, adapter)
     s.headers.update({"User-Agent": USER_AGENT})
     return s
 
