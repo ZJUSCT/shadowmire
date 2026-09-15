@@ -29,6 +29,12 @@ ENV PATH="/opt/shadowmire/bin:${PATH}" \
 
 COPY --from=builder /opt/shadowmire /opt/shadowmire
 
+# Some deployment wrappers invoke the interpreter as
+# `python3 /usr/local/bin/shadowmire` (runpy.run_path() does not search PATH),
+# so expose the console script at the same absolute path as the
+# ustcmirror/shadowmire image.
+RUN ln -s /opt/shadowmire/bin/shadowmire /usr/local/bin/shadowmire
+
 # Mount the mirror repository here, or override the working directory at run
 # time. Shadowmire uses its current directory when --repo is not specified.
 WORKDIR /mirror
