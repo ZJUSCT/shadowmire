@@ -86,7 +86,15 @@ class SyncPyPI(SyncBase):
                     recorded_serial,
                     self.last_serial,
                 )
-                return None
+                # Return 0 ("handled, do not record") instead of None: PyPI
+                # delete/undelete races make this branch routine, and a None
+                # return is treated as a run failure by
+                # SyncBase.parallel_update(), which would keep the run from
+                # finalizing (and thus from publishing) for as long as
+                # recently deleted packages remain within IGNORE_THRESHOLD.
+                # Either way the package stays unrecorded, so the next run
+                # re-checks it.
+                return 0
 
             logger.warning(
                 "%s missing from upstream (its serial %s, remote last serial %s), remove and ignore in the future.",
