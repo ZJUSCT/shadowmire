@@ -166,8 +166,8 @@ class FileInclusionChecker:
 
     def __init__(
         self,
-        prerelease_exclude: tuple[str],
-        excluded_wheel_filename: tuple[str],
+        prerelease_exclude: tuple[str, ...],
+        excluded_wheel_filename: tuple[str, ...],
         filter_meta: bool,
         skip_yanked: bool,
         skip_old_packages_days: int | None,

@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
@@ -22,9 +23,15 @@ from ..constants import (
 )
 from ..database import LocalVersionKV
 from ..errors import ExitProgramException, exit_with_futures
-from ..filesystem import overwrite, remove_dir_with_files
+from ..filesystem import (
+    MAX_FILENAME_BYTES,
+    ignore_unrepresentable_path,
+    overwrite,
+    remove_dir_with_files,
+)
 from ..filters import FileInclusionChecker, PackageInclusionChecker
 from ..simple import (
+    file_url_to_local_path,
     file_url_to_local_url,
     generate_html_simple_page,
     generate_json_simple_page,
@@ -68,6 +75,42 @@ class SyncBase:
         self.packages_dir.mkdir(parents=True, exist_ok=True)
         self.jsonmeta_dir.mkdir(parents=True, exist_ok=True)
         self.sync_packages = sync_packages
+
+    def filename_too_long(self, package_name: str, name: str) -> bool:
+        size = len(os.fsencode(name))
+        if size <= MAX_FILENAME_BYTES:
+            return False
+        logger.warning(
+            "Rejecting project %s: filename %r is %d bytes (limit %d); "
+            "marking as not found upstream",
+            package_name,
+            name,
+            size,
+            MAX_FILENAME_BYTES,
+        )
+        return True
+
+    def release_names_too_long(self, package_name: str, meta: dict) -> bool:
+        # Inspect the original releases even when filters exclude them or files
+        # are not being downloaded.
+        for release in meta["releases"].values():
+            for file in release:
+                if self.filename_too_long(package_name, file["filename"]):
+                    return True
+                path = file_url_to_local_path(file["url"])
+                for part in path.parts:
+                    if self.filename_too_long(package_name, part):
+                        return True
+        return False
+
+    def reject_project(self, package_name: str, use_db: bool) -> int:
+        self.do_remove(package_name, use_db=False)
+        for suffix in (".new", ".new.tmp", ".tmp"):
+            with ignore_unrepresentable_path():
+                (self.jsonmeta_dir / (package_name + suffix)).unlink(missing_ok=True)
+        if use_db:
+            self.record_local_update(package_name, PACKAGE_NOT_FOUND_SERIAL, False)
+        return PACKAGE_NOT_FOUND_SERIAL
 
     def filter_remote(
         self, remote: dict[str, int], package_inclusion_checker: PackageInclusionChecker
@@ -486,7 +529,9 @@ class SyncBase:
     def record_local_update(
         self, package_name: str, serial: int, package_files_included: bool
     ) -> None:
-        if package_files_included:
+        if serial == PACKAGE_NOT_FOUND_SERIAL:
+            file_serial = PACKAGE_FILES_METADATA_ONLY
+        elif package_files_included:
             file_serial = serial if self.sync_packages else PACKAGE_FILES_PENDING
         else:
             file_serial = PACKAGE_FILES_METADATA_ONLY
@@ -549,24 +594,29 @@ class SyncBase:
     ) -> None:
         metajson_path = self.jsonmeta_dir / package_name
         package_simple_dir = self.simple_dir / package_name
-        if metajson_path.exists() or package_simple_dir.exists():
-            # To make this less noisy...
-            logger.info("Removing package %s", package_name)
-        packages_to_remove = get_existing_hrefs(package_simple_dir)
+        with ignore_unrepresentable_path():
+            if metajson_path.exists() or package_simple_dir.exists():
+                logger.info("Removing package %s", package_name)
+        packages_to_remove = None
+        with ignore_unrepresentable_path():
+            packages_to_remove = get_existing_hrefs(package_simple_dir)
         if remove_packages and packages_to_remove:
             paths_to_remove = []
             for p, has_metadata in packages_to_remove:
-                path = package_simple_dir / p
+                path = package_simple_dir / unquote(p)
                 paths_to_remove.append(path)
                 if has_metadata:
                     paths_to_remove.append(path.with_name(path.name + ".metadata"))
             for p in paths_to_remove:
-                if p.exists():
-                    p.unlink()
-                    logger.info("Removed file %s", p)
-        remove_dir_with_files(package_simple_dir)
+                with ignore_unrepresentable_path():
+                    if p.exists():
+                        p.unlink()
+                        logger.info("Removed file %s", p)
+        with ignore_unrepresentable_path():
+            remove_dir_with_files(package_simple_dir)
         metajson_path = self.jsonmeta_dir / package_name
-        metajson_path.unlink(missing_ok=True)
+        with ignore_unrepresentable_path():
+            metajson_path.unlink(missing_ok=True)
         if use_db:
             old_serial = self.local_db.get(package_name)
             if old_serial != PACKAGE_NOT_FOUND_SERIAL:

@@ -59,6 +59,8 @@ class SyncPyPI(SyncBase):
         use_db: bool = True,
     ) -> int | None:
         logger.info("updating %s", package_name)
+        if self.filename_too_long(package_name, package_name):
+            return self.reject_project(package_name, use_db)
         package_simple_path = self.simple_dir / package_name
         exists = package_simple_path.exists()
         try:
@@ -102,6 +104,8 @@ class SyncPyPI(SyncBase):
                 PACKAGE_FILES_METADATA_ONLY,
             )
             return None
+        if self.release_names_too_long(package_name, meta_original):
+            return self.reject_project(package_name, use_db)
         if not exists:
             package_simple_path.mkdir(exist_ok=True)
 

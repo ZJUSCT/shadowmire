@@ -1,3 +1,4 @@
+import errno
 import logging
 import os
 import re
@@ -7,6 +8,19 @@ from pathlib import Path
 from typing import IO, Any, Literal
 
 logger = logging.getLogger(__name__)
+
+# Leave room for sidecar and temporary-file suffixes on common filesystems.
+MAX_FILENAME_BYTES = 240
+
+
+@contextmanager
+def ignore_unrepresentable_path() -> Generator[None, None, None]:
+    """An overlong path cannot name an existing file during removal."""
+    try:
+        yield
+    except OSError as e:
+        if e.errno != errno.ENAMETOOLONG:
+            raise
 
 
 @contextmanager

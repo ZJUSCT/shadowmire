@@ -7,7 +7,7 @@ LOCAL_JSON_NAME = "local.json"
 LOCAL_DB_SERIAL_NAME = "local.db.serial"
 
 # Sentinel stored in LocalVersionKV.local.value when a project is present in the
-# upstream project list but its project metadata endpoint returns not found.
+# upstream project list but is missing or rejected for overlong filenames.
 PACKAGE_NOT_FOUND_SERIAL = -1
 
 # Values reserved for LocalVersionKV.local.file_serial. A NULL file_serial is
